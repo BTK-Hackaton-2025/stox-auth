@@ -1,8 +1,10 @@
-import { Module } from '@nestjs/common';
+import { Module, MiddlewareConsumer, RequestMethod } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import pinoHttp from 'pino-http';
+import { v4 as uuidv4 } from 'uuid';
 
 // Entities
 import { User } from '../../infrastructure/database/entities/user.entity';
@@ -27,6 +29,9 @@ import { LocalStrategy } from './strategies/local.strategy';
 // Guards
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
+import { GrpcExceptionFilter } from './filters/grpc-exception.filter';
+import { GrpcValidationPipe } from './pipes/grpc-validation.pipe';
+import { createLogger } from '../../config/logger.config';
 
 @Module({
   imports: [
@@ -77,6 +82,8 @@ import { RolesGuard } from './guards/roles.guard';
     // Guards
     JwtAuthGuard,
     RolesGuard,
+    GrpcExceptionFilter,
+    GrpcValidationPipe,
   ],
   exports: [
     // Export services for use in other modules
@@ -89,4 +96,71 @@ import { RolesGuard } from './guards/roles.guard';
     RolesGuard,
   ],
 })
-export class AuthModule {} 
+export class AuthModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Add pino-http middleware for HTTP request logging
+    const logger = createLogger();
+    
+    consumer
+      .apply(
+        pinoHttp({
+          logger,
+          genReqId: (req: any) => {
+            // Use existing request ID or generate new one
+            return req.headers['x-request-id'] || uuidv4();
+          },
+          customLogLevel: (res: any, err: any) => {
+            if (res.statusCode >= 400 && res.statusCode < 500) {
+              return 'warn';
+            } else if (res.statusCode >= 500 || err) {
+              return 'error';
+            }
+            return 'info';
+          },
+          customSuccessMessage: (res: any) => {
+            return `${res.req.method} ${res.req.url} - ${res.statusCode}`;
+          },
+          customErrorMessage: (error: any, res: any) => {
+            return `${res.req.method} ${res.req.url} - ${res.statusCode} - ${error.message}`;
+          },
+          // Redact sensitive data from request/response logging
+          redact: {
+            paths: [
+              'req.headers.authorization',
+              'req.body.password',
+              'req.body.currentPassword',
+              'req.body.newPassword',
+              'res.body.tokens',
+              'res.body.accessToken',
+              'res.body.refreshToken',
+            ],
+            remove: true,
+          },
+          // Custom serializers for auth-specific data
+          serializers: {
+            req: (req: any) => ({
+              method: req.method,
+              url: req.url,
+              headers: {
+                host: req.headers.host,
+                'user-agent': req.headers['user-agent'],
+                'content-type': req.headers['content-type'],
+                'x-forwarded-for': req.headers['x-forwarded-for'],
+                'x-real-ip': req.headers['x-real-ip'],
+              },
+              remoteAddress: req.connection?.remoteAddress,
+              remotePort: req.connection?.remotePort,
+            }),
+            res: (res: any) => ({
+              statusCode: res.statusCode,
+              headers: {
+                'content-type': res.getHeader('content-type'),
+                'content-length': res.getHeader('content-length'),
+              },
+            }),
+          },
+        })
+      )
+      .forRoutes({ path: '*', method: RequestMethod.ALL });
+  }
+} 

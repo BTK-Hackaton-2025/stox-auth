@@ -1,7 +1,14 @@
 import { ThrottlerModuleOptions } from '@nestjs/throttler';
 
+// Define interface for rate limit configuration with name property
+interface NamedRateLimit {
+  name: string;
+  ttl: number;
+  limit: number;
+}
+
 // Rate limiting configuration based on README specifications
-export const throttlerConfig: ThrottlerModuleOptions = [
+export const throttlerConfig: NamedRateLimit[] = [
   {
     name: 'default',
     ttl: 60000, // 1 minute window

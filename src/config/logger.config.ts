@@ -80,8 +80,22 @@ export const createLoggerConfig = (serviceName: string = 'stox-auth-service'): L
           stack: error.stack,
           code: error.code,
           status: error.status,
-          // Don't log sensitive error details in production
-          ...(process.env.NODE_ENV === 'development' && { details: error }),
+          // Include only safe error details in development
+          ...(process.env.NODE_ENV === 'development' && {
+            details: {
+              name: error.name,
+              message: error.message,
+              stack: error.stack,
+              code: error.code,
+              status: error.status,
+              statusCode: error.statusCode,
+              response: error.response ? {
+                status: error.response.status,
+                statusText: error.response.statusText,
+                // Exclude potentially sensitive response data
+              } : undefined,
+            }
+          }),
         };
       },
       

@@ -22,9 +22,7 @@ import { extendedThrottlerConfig } from './config/throttler.config';
 
     // Rate limiting configuration with auth-specific limits
     ThrottlerModule.forRootAsync({
-      imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => extendedThrottlerConfig,
-      inject: [ConfigService],
+      useFactory: () => extendedThrottlerConfig,
     }),
 
     // Database connection

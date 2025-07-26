@@ -31,7 +31,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { GrpcExceptionFilter } from './filters/grpc-exception.filter';
 import { GrpcValidationPipe } from './pipes/grpc-validation.pipe';
-import { createLogger } from '../../config/logger.config';
+import { logger } from '../../config/logger.config';
 
 @Module({
   imports: [
@@ -99,8 +99,7 @@ import { createLogger } from '../../config/logger.config';
 export class AuthModule {
   configure(consumer: MiddlewareConsumer) {
     // Add pino-http middleware for HTTP request logging
-    const logger = createLogger();
-    
+    // Use the same logger instance as the main application to prevent duplicates
     consumer
       .apply(
         pinoHttp({

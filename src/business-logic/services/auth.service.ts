@@ -314,7 +314,18 @@ export class AuthService {
       const tokens = await this.jwtTokenService.refreshTokens(refreshToken, options);
 
       // Get user info for logging (tokens contain user data)
-      const decodedToken = this.jwtTokenService.decodeToken(tokens.accessToken);
+      let decodedToken;
+      try {
+        decodedToken = this.jwtTokenService.decodeToken(tokens.accessToken);
+      } catch (error) {
+        logger.warn({
+          event: 'token_decode_failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+          ipAddress: options?.ipAddress,
+          userAgent: options?.userAgent,
+        }, 'Failed to decode access token for logging purposes');
+        decodedToken = null;
+      }
       
       logAuthEvent('token_refresh', {
         userId: decodedToken?.sub,

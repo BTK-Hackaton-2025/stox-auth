@@ -1,18 +1,46 @@
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { ConfigService } from '@nestjs/config';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe } from '@nestjs/common';
 import { join } from 'path';
+import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { logger, PinoLoggerService } from './config/logger.config';
 
 async function bootstrap() {
-  const logger = new Logger('Bootstrap');
-
   try {
-    // Create NestJS application
+    logger.info({
+      event: 'application_startup',
+      nodeEnv: process.env.NODE_ENV,
+      nodeVersion: process.version,
+    }, 'Starting Stox Auth Microservice');
+
+    // Create NestJS application with pino logger
     const app = await NestFactory.create(AppModule, {
-      logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+      logger: false, // Disable default logger, we'll use pino
+      bufferLogs: true,
     });
+
+    // Use pino as the application logger
+    app.useLogger(new PinoLoggerService());
+
+    // Add security headers for HTTP endpoints
+    app.use(helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          scriptSrc: ["'self'"],
+          imgSrc: ["'self'", "data:", "https:"],
+        },
+      },
+      crossOriginEmbedderPolicy: false, // Allow for development/testing
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
+    }));
 
     // Get configuration service
     const configService = app.get(ConfigService);
@@ -53,43 +81,70 @@ async function bootstrap() {
 
     // Start all microservices
     await app.startAllMicroservices();
-    logger.log(`🚀 gRPC Auth Microservice is running on ${grpcOptions.options.url}`);
+    logger.info({
+      event: 'grpc_server_started',
+      url: grpcOptions.options.url,
+      package: 'auth',
+      protoPath: grpcOptions.options.protoPath,
+    }, '🚀 gRPC Auth Microservice is running');
 
     // Optionally start HTTP server for health checks
     const httpPort = configService.get('HTTP_PORT', 3000);
     await app.listen(httpPort);
-    logger.log(`🔧 HTTP Health Check server is running on port ${httpPort}`);
+    logger.info({
+      event: 'http_server_started',
+      port: httpPort,
+      purpose: 'health_checks',
+    }, '🔧 HTTP Health Check server is running');
 
     // Graceful shutdown
     process.on('SIGTERM', async () => {
-      logger.log('SIGTERM received, shutting down gracefully');
+      logger.info({
+        event: 'application_shutdown',
+        signal: 'SIGTERM',
+      }, 'SIGTERM received, shutting down gracefully');
       await app.close();
       process.exit(0);
     });
 
     process.on('SIGINT', async () => {
-      logger.log('SIGINT received, shutting down gracefully');
+      logger.info({
+        event: 'application_shutdown',
+        signal: 'SIGINT',
+      }, 'SIGINT received, shutting down gracefully');
       await app.close();
       process.exit(0);
     });
 
   } catch (error) {
-    logger.error(`Failed to start application: ${error instanceof Error ? error.message : 'Unknown error'}`, error instanceof Error ? error.stack : undefined);
+    logger.error({
+      event: 'application_startup_failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      stack: error instanceof Error ? error.stack : undefined,
+    }, 'Failed to start application');
     process.exit(1);
   }
 }
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  const logger = new Logger('UnhandledRejection');
-  logger.error('Unhandled Promise Rejection:', reason);
+  logger.fatal({
+    event: 'unhandled_promise_rejection',
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+    promise: String(promise),
+  }, 'Unhandled Promise Rejection - shutting down');
   process.exit(1);
 });
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  const logger = new Logger('UncaughtException');
-  logger.error('Uncaught Exception:', error);
+  logger.fatal({
+    event: 'uncaught_exception',
+    error: error.message,
+    stack: error.stack,
+    name: error.name,
+  }, 'Uncaught Exception - shutting down');
   process.exit(1);
 });
 

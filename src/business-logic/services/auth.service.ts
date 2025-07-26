@@ -11,6 +11,7 @@ import { RefreshTokenRepository } from '../../infrastructure/database/repositori
 import { JwtTokenService, TokenPair, DecodedToken } from './jwt.service';
 import { PasswordService } from './password.service';
 import { User, UserRole } from '../../infrastructure/database/entities/user.entity';
+import { logger, logAuthEvent, logSecurityEvent } from '../../config/logger.config';
 
 export interface RegisterUserDto {
   email: string;
@@ -68,9 +69,25 @@ export class AuthService {
       // Normalize email
       const normalizedEmail = email.toLowerCase().trim();
 
+      logger.info({
+        event: 'registration_attempt',
+        email: normalizedEmail,
+        role,
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+      }, 'User registration attempt');
+
       // Check if user already exists
       const existingUser = await this.userRepository.findByEmail(normalizedEmail);
       if (existingUser) {
+        logAuthEvent('register', {
+          email: normalizedEmail,
+          success: false,
+          error: 'Email already exists',
+          ipAddress: options?.ipAddress,
+          userAgent: options?.userAgent,
+        });
+
         return {
           success: false,
           message: 'User with this email already exists',
@@ -81,6 +98,14 @@ export class AuthService {
       // Validate password strength
       const passwordValidation = this.passwordService.validatePasswordStrength(password);
       if (!passwordValidation.isValid) {
+        logAuthEvent('register', {
+          email: normalizedEmail,
+          success: false,
+          error: 'Password validation failed',
+          ipAddress: options?.ipAddress,
+          userAgent: options?.userAgent,
+        });
+
         return {
           success: false,
           message: 'Password does not meet security requirements',
@@ -103,6 +128,21 @@ export class AuthService {
       // Generate tokens
       const tokens = await this.jwtTokenService.generateTokenPair(user, options);
 
+      logAuthEvent('register', {
+        userId: user.id,
+        email: normalizedEmail,
+        success: true,
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+      });
+
+      logger.info({
+        event: 'user_created',
+        userId: user.id,
+        email: normalizedEmail,
+        role: user.role,
+      }, 'New user registered successfully');
+
       return {
         success: true,
         message: 'User registered successfully',
@@ -110,6 +150,15 @@ export class AuthService {
         tokens,
       };
     } catch (error) {
+      logger.error({
+        event: 'registration_error',
+        email: registerData.email,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+      }, 'Registration failed with error');
+
       throw new BadRequestException(`Registration failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -122,21 +171,54 @@ export class AuthService {
     options?: { ipAddress?: string; userAgent?: string }
   ): Promise<AuthResult> {
     const { email, password } = loginData;
+    const normalizedEmail = email.toLowerCase().trim();
+
+    logger.info({
+      event: 'login_attempt',
+      email: normalizedEmail,
+      ipAddress: options?.ipAddress,
+      userAgent: options?.userAgent,
+    }, 'User login attempt');
 
     // Find user by email
-    const user = await this.userRepository.findByEmail(email.toLowerCase().trim());
+    const user = await this.userRepository.findByEmail(normalizedEmail);
     if (!user) {
+      logAuthEvent('login', {
+        email: normalizedEmail,
+        success: false,
+        error: 'User not found',
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+      });
+
       throw new UnauthorizedException('Invalid credentials');
     }
 
     // Check if user account is active
     if (!user.isActive) {
+      logSecurityEvent('account_locked', {
+        userId: user.id,
+        email: normalizedEmail,
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+        details: 'Inactive account login attempt',
+      });
+
       throw new UnauthorizedException('Account is deactivated');
     }
 
     // Verify password
     const isPasswordValid = await this.passwordService.verifyPassword(password, user.passwordHash);
     if (!isPasswordValid) {
+      logAuthEvent('login', {
+        userId: user.id,
+        email: normalizedEmail,
+        success: false,
+        error: 'Invalid password',
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+      });
+
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -145,6 +227,12 @@ export class AuthService {
     if (needsRehash) {
       const newHash = await this.passwordService.hashPassword(password);
       await this.userRepository.updatePassword(user.id, newHash);
+      
+      logger.info({
+        event: 'password_rehashed',
+        userId: user.id,
+        email: normalizedEmail,
+      }, 'Password rehashed with updated salt rounds');
     }
 
     // Update last login time
@@ -152,6 +240,21 @@ export class AuthService {
 
     // Generate tokens
     const tokens = await this.jwtTokenService.generateTokenPair(user, options);
+
+    logAuthEvent('login', {
+      userId: user.id,
+      email: normalizedEmail,
+      success: true,
+      ipAddress: options?.ipAddress,
+      userAgent: options?.userAgent,
+    });
+
+    logger.info({
+      event: 'login_successful',
+      userId: user.id,
+      email: normalizedEmail,
+      lastLoginAt: new Date().toISOString(),
+    }, 'User logged in successfully');
 
     return {
       success: true,
@@ -171,6 +274,12 @@ export class AuthService {
       // Verify user still exists and is active
       const user = await this.userRepository.findById(decodedToken.userId);
       if (!user || !user.isActive) {
+        logSecurityEvent('invalid_token', {
+          userId: decodedToken.userId,
+          email: decodedToken.email,
+          details: user ? 'Inactive account' : 'User not found',
+        });
+
         return {
           valid: false,
           message: 'User account not found or inactive',
@@ -182,6 +291,11 @@ export class AuthService {
         user: decodedToken,
       };
     } catch (error) {
+      logger.debug({
+        event: 'token_validation_failed',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }, 'Token validation failed');
+
       return {
         valid: false,
         message: error instanceof Error ? error.message : 'Invalid token',
@@ -199,12 +313,46 @@ export class AuthService {
     try {
       const tokens = await this.jwtTokenService.refreshTokens(refreshToken, options);
 
+      // Get user info for logging (tokens contain user data)
+      let decodedToken;
+      try {
+        decodedToken = this.jwtTokenService.decodeToken(tokens.accessToken);
+      } catch (error) {
+        logger.warn({
+          event: 'token_decode_failed',
+          error: error instanceof Error ? error.message : 'Unknown error',
+          ipAddress: options?.ipAddress,
+          userAgent: options?.userAgent,
+        }, 'Failed to decode access token for logging purposes');
+        decodedToken = null;
+      }
+      
+      logAuthEvent('token_refresh', {
+        userId: decodedToken?.sub,
+        success: true,
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+      });
+
+      logger.debug({
+        event: 'tokens_refreshed',
+        userId: decodedToken?.sub,
+        ipAddress: options?.ipAddress,
+      }, 'Access tokens refreshed successfully');
+
       return {
         success: true,
         message: 'Tokens refreshed successfully',
         tokens,
       };
     } catch (error) {
+      logger.warn({
+        event: 'token_refresh_failed',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+      }, 'Token refresh failed');
+
       throw new UnauthorizedException(`Token refresh failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -218,18 +366,44 @@ export class AuthService {
     reason: string = 'User logout'
   ): Promise<{ success: boolean; message: string }> {
     try {
+      let userId: string | undefined;
+
+      // Try to get user ID from access token for logging
+      if (accessToken) {
+        try {
+          const decodedToken = this.jwtTokenService.decodeToken(accessToken);
+          userId = decodedToken?.sub;
+        } catch {
+          // Ignore decode errors for logging purposes
+        }
+      }
+
       if (refreshToken) {
         await this.jwtTokenService.revokeRefreshToken(refreshToken, reason);
       }
 
-      // Optional: You could also maintain a blacklist for access tokens
-      // if you need immediate token invalidation
+      logAuthEvent('logout', {
+        userId,
+        success: true,
+      });
+
+      logger.info({
+        event: 'user_logout',
+        userId,
+        reason,
+      }, 'User logged out successfully');
 
       return {
         success: true,
         message: 'Logout successful',
       };
     } catch (error) {
+      logger.error({
+        event: 'logout_error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        reason,
+      }, 'Logout failed');
+
       return {
         success: false,
         message: `Logout failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -304,12 +478,25 @@ export class AuthService {
       throw new NotFoundException('User not found');
     }
 
+    logger.info({
+      event: 'password_change_attempt',
+      userId,
+      email: user.email,
+    }, 'User attempting to change password');
+
     // Verify current password
     const isCurrentPasswordValid = await this.passwordService.verifyPassword(
       currentPassword,
       user.passwordHash
     );
     if (!isCurrentPasswordValid) {
+      logAuthEvent('password_change', {
+        userId,
+        email: user.email,
+        success: false,
+        error: 'Invalid current password',
+      });
+
       return {
         success: false,
         message: 'Current password is incorrect',
@@ -320,6 +507,13 @@ export class AuthService {
     // Validate new password strength
     const passwordValidation = this.passwordService.validatePasswordStrength(newPassword);
     if (!passwordValidation.isValid) {
+      logAuthEvent('password_change', {
+        userId,
+        email: user.email,
+        success: false,
+        error: 'New password validation failed',
+      });
+
       return {
         success: false,
         message: 'New password does not meet security requirements',
@@ -333,6 +527,19 @@ export class AuthService {
     // Update password and revoke all refresh tokens for security
     await this.userRepository.updatePassword(userId, newPasswordHash);
     await this.jwtTokenService.revokeAllUserTokens(userId, 'Password changed');
+
+    logAuthEvent('password_change', {
+      userId,
+      email: user.email,
+      success: true,
+    });
+
+    logger.info({
+      event: 'password_changed',
+      userId,
+      email: user.email,
+      tokensRevoked: true,
+    }, 'User password changed successfully');
 
     return {
       success: true,

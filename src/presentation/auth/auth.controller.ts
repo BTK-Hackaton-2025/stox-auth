@@ -104,7 +104,7 @@ export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
   @Public()
-  @Throttle({ default: { limit: 1, ttl: 60000 } }) // 1 request per minute
+  @Throttle({ registration: { limit: 1, ttl: 60000 } }) // 1 req/min (strict anti-spam)
   @GrpcMethod('AuthService', 'Register')
   @UsePipes(new GrpcValidationPipe())
   async register(request: RegisterDto): Promise<AuthResponse> {
@@ -140,7 +140,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 5, ttl: 60000 } }) // 5 requests per minute
+  @Throttle({ login: { limit: 5, ttl: 60000 } }) // 5 req/min (brute force protection)
   @GrpcMethod('AuthService', 'Login')
   @UsePipes(new GrpcValidationPipe())
   async login(request: LoginDto): Promise<AuthResponse> {
@@ -173,7 +173,7 @@ export class AuthController {
   }
 
   @Public()
-  @SkipThrottle() // Allow unlimited requests for token validation
+  @Throttle({ 'validate-token': { limit: 1000, ttl: 60000 } }) // High limit, essentially unlimited
   @GrpcMethod('AuthService', 'ValidateToken')
   async validateToken(request: ValidateTokenRequest): Promise<ValidateTokenResponse> {
     const result = await this.authService.validateToken(request.token);
@@ -189,7 +189,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
+  @Throttle({ refresh: { limit: 10, ttl: 60000 } }) // 10 req/min
   @GrpcMethod('AuthService', 'RefreshToken')
   async refreshToken(request: RefreshTokenRequest): Promise<AuthResponse> {
     const result = await this.authService.refreshTokens(request.refreshToken);
@@ -207,7 +207,7 @@ export class AuthController {
     };
   }
 
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
+  @Throttle({ logout: { limit: 10, ttl: 60000 } }) // 10 req/min
   @GrpcMethod('AuthService', 'Logout')
   async logout(request: LogoutRequest): Promise<LogoutResponse> {
     const result = await this.authService.logout(
@@ -222,7 +222,7 @@ export class AuthController {
     };
   }
 
-  @Throttle({ default: { limit: 30, ttl: 60000 } }) // 30 requests per minute
+  @Throttle({ profile: { limit: 30, ttl: 60000 } }) // 30 req/min
   @GrpcMethod('AuthService', 'GetProfile')
   async getProfile(
     @Payload() request: GetProfileRequest,
@@ -261,7 +261,7 @@ export class AuthController {
     };
   }
 
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // 10 requests per minute
+  @Throttle({ 'update-profile': { limit: 10, ttl: 60000 } }) // 10 req/min
   @GrpcMethod('AuthService', 'UpdateProfile')
   async updateProfile(
     request: UpdateProfileRequest,
@@ -308,7 +308,7 @@ export class AuthController {
     };
   }
 
-  @Throttle({ default: { limit: 3, ttl: 60000 } }) // 3 requests per minute (strict for security)
+  @Throttle({ 'password-change': { limit: 3, ttl: 60000 } }) // 3 req/min (strict security)
   @GrpcMethod('AuthService', 'ChangePassword')
   async changePassword(
     request: ChangePasswordRequest,

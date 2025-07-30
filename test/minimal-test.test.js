@@ -71,13 +71,16 @@ describe('Minimal gRPC Test', () => {
 
     console.log('🧪 Testing weak password...');
 
-          return new Promise((resolve, reject) => {
+    return new Promise((resolve, reject) => {
         client.Register(testData, (error, response) => {
-          expect(error).toBeDefined();
-          // The actual error message is "Internal server error" not "Validation failed"
-          console.log('❌ Expected failure:', error.message);
-          resolve();
+          if (error) {
+            console.log('❌ Expected failure:', error.message);
+            resolve();
+          } else {
+            console.log('❌ Expected failure but got success');
+            reject(new Error('Expected failure but got success'));
+          }
         });
-      });
+    });
   });
 }); 

@@ -21,6 +21,7 @@ ENV DOCKER_CONTAINER=true
 # Copy only what we need to run the app
 COPY --from=builder /app/dist        ./dist
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/src/proto   ./src/proto
 COPY package*.json ./
 
 # Expose HTTP (REST) and gRPC ports

@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: stox-auth-postgres
+    environment:
+      POSTGRES_DB: stox_auth
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 4Lt0g
+    ports:
+      - "5437:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/stox-auth/data
+    networks:
+      - stox-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d stox_auth"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Auth Microservice
+  stox-auth:
+    image: stox-auth
+    container_name: stox-auth-service
+    ports:
+      - "3000:3000"    # HTTP port
+      - "50051:50051"  # gRPC port
+    environment:
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: postgres
+      DB_PASSWORD: 4Lt0g
+      DB_NAME: stox_auth
+      DB_MAX_CONNECTIONS: 10
+      DB_MIN_CONNECTIONS: 1
+      JWT_ACCESS_SECRET: your_super_secure_access_secret_here_at_least_32_characters_long
+      JWT_REFRESH_SECRET: your_super_secure_refresh_secret_here_at_least_32_characters_long
+      JWT_ACCESS_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      GRPC_HOST: 0.0.0.0
+      GRPC_PORT: 50051
+      HTTP_PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - stox-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  stox-network:
+    driver: bridge

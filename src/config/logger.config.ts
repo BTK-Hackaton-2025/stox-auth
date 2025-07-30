@@ -119,31 +119,14 @@ export const createLoggerConfig = (serviceName: string = 'stox-auth-service'): L
     },
   };
 
-  // Add pretty printing for development
-  if (isDevelopment) {
+  // Only add transport in development and if not in container
+  if (isDevelopment && !process.env.DOCKER_CONTAINER) {
     config.transport = {
       target: 'pino-pretty',
       options: {
         colorize: true,
-        translateTime: 'HH:MM:ss',
-        ignore: 'hostname,pid',
-        singleLine: false,
-        hideObject: false,
-        messageFormat: '{msg} {req.method} {req.url} {res.statusCode}',
-        customPrettifiers: {
-          time: (timestamp: string) => `🕐 ${timestamp}`,
-                     level: (level: string) => {
-             const colors: Record<string, string> = {
-               '30': '🔍', // trace
-               '40': '🐛', // debug
-               '50': 'ℹ️ ', // info
-               '60': '⚠️ ', // warn
-               '70': '❌', // error
-               '80': '💀', // fatal
-             };
-             return colors[level] || '📝';
-           },
-        },
+        translateTime: 'SYS:standard',
+        ignore: 'pid,hostname',
       },
     };
   }

@@ -117,10 +117,16 @@ export class AuthModule {
             return 'info';
           },
           customSuccessMessage: (res: any) => {
-            return `${res.req.method} ${res.req.url} - ${res.statusCode}`;
+            if (res.req && res.req.method) {
+              return `${res.req.method} ${res.req.url} - ${res.statusCode}`;
+            }
+            return `gRPC call OK (${res.statusCode})`;
           },
           customErrorMessage: (error: any, res: any) => {
-            return `${res.req.method} ${res.req.url} - ${res.statusCode} - ${error.message}`;
+            if (res.req && res.req.method) {
+              return `${res.req.method} ${res.req.url} - ${res.statusCode} - ${error.message}`;
+            }
+            return `gRPC call ERROR (${res.statusCode}) - ${error.message}`;
           },
           // Redact sensitive data from request/response logging
           redact: {
@@ -150,13 +156,20 @@ export class AuthModule {
               remoteAddress: req.connection?.remoteAddress,
               remotePort: req.connection?.remotePort,
             }),
-            res: (res: any) => ({
-              statusCode: res.statusCode,
-              headers: {
-                'content-type': res.getHeader('content-type'),
-                'content-length': res.getHeader('content-length'),
-              },
-            }),
+            res: (res: any) => {
+              // Skip serialization for gRPC responses (no getHeader method)
+              if (typeof res.getHeader !== 'function') {
+                return { statusCode: res.statusCode || 'unknown' };
+              }
+              // HTTP response serialization
+              return {
+                statusCode: res.statusCode,
+                headers: {
+                  'content-type': res.getHeader('content-type'),
+                  'content-length': res.getHeader('content-length'),
+                },
+              };
+            },
           },
         })
       )

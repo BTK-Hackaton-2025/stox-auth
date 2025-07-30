@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { validate, ValidationError } from 'class-validator';
 import { plainToClass } from 'class-transformer';
+import { logger } from '../../../config/logger.config';
 
 @Injectable()
 export class GrpcValidationPipe implements PipeTransform<any> {
@@ -14,6 +15,13 @@ export class GrpcValidationPipe implements PipeTransform<any> {
     if (!metatype || !this.toValidate(metatype)) {
       return value;
     }
+
+    logger.debug({
+      event: 'validation_start',
+      dtoType: metatype.name,
+      hasValue: !!value,
+      valueKeys: value ? Object.keys(value) : [],
+    }, '🔍 Starting validation');
 
     // Transform plain object to class instance
     const object = plainToClass(metatype, value);
@@ -30,11 +38,25 @@ export class GrpcValidationPipe implements PipeTransform<any> {
 
     if (errors.length > 0) {
       const errorMessages = this.formatValidationErrors(errors);
+      
+      logger.warn({
+        event: 'validation_failed',
+        dtoType: metatype.name,
+        errorCount: errors.length,
+        errors: errorMessages,
+        valueKeys: value ? Object.keys(value) : [],
+      }, '❌ Validation failed');
+
       throw new BadRequestException({
         message: 'Validation failed',
         errors: errorMessages,
       });
     }
+
+    logger.debug({
+      event: 'validation_success',
+      dtoType: metatype.name,
+    }, '✅ Validation passed');
 
     return object;
   }

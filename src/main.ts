@@ -89,7 +89,7 @@ async function bootstrap() {
     }, '🚀 gRPC Auth Microservice is running');
 
     // Optionally start HTTP server for health checks
-    const httpPort = configService.get('HTTP_PORT', 3000);
+    const httpPort = configService.get('HTTP_PORT', 5051);
     await app.listen(httpPort);
     logger.info({
       event: 'http_server_started',

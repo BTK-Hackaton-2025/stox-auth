@@ -60,3 +60,5 @@ temp/
 
 # Yarn Integrity file
 .yarn-integrity
+
+test-results/

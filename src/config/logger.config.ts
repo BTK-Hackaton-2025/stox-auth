@@ -125,10 +125,25 @@ export const createLoggerConfig = (serviceName: string = 'stox-auth-service'): L
       target: 'pino-pretty',
       options: {
         colorize: true,
-        translateTime: 'SYS:standard',
+        translateTime: 'HH:MM:ss',
         ignore: 'hostname,pid',
         singleLine: false,
         hideObject: false,
+        messageFormat: '{msg} {req.method} {req.url} {res.statusCode}',
+        customPrettifiers: {
+          time: (timestamp: string) => `🕐 ${timestamp}`,
+                     level: (level: string) => {
+             const colors: Record<string, string> = {
+               '30': '🔍', // trace
+               '40': '🐛', // debug
+               '50': 'ℹ️ ', // info
+               '60': '⚠️ ', // warn
+               '70': '❌', // error
+               '80': '💀', // fatal
+             };
+             return colors[level] || '📝';
+           },
+        },
       },
     };
   }

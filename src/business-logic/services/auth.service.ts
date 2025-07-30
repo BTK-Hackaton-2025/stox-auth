@@ -75,18 +75,20 @@ export class AuthService {
         role,
         ipAddress: options?.ipAddress,
         userAgent: options?.userAgent,
-      }, 'User registration attempt');
+        step: 'start',
+      }, '🚀 Starting user registration');
 
       // Check if user already exists
       const existingUser = await this.userRepository.findByEmail(normalizedEmail);
       if (existingUser) {
-        logAuthEvent('register', {
+        logger.warn({
+          event: 'registration_failed',
           email: normalizedEmail,
-          success: false,
-          error: 'Email already exists',
+          reason: 'email_exists',
+          step: 'validation',
           ipAddress: options?.ipAddress,
           userAgent: options?.userAgent,
-        });
+        }, '❌ Registration failed: Email already exists');
 
         return {
           success: false,
@@ -96,15 +98,23 @@ export class AuthService {
       }
 
       // Validate password strength
+      logger.debug({
+        event: 'password_validation',
+        email: normalizedEmail,
+        step: 'validation',
+      }, '🔐 Validating password strength');
+      
       const passwordValidation = this.passwordService.validatePasswordStrength(password);
       if (!passwordValidation.isValid) {
-        logAuthEvent('register', {
+        logger.warn({
+          event: 'registration_failed',
           email: normalizedEmail,
-          success: false,
-          error: 'Password validation failed',
+          reason: 'password_validation_failed',
+          step: 'validation',
+          errors: passwordValidation.errors,
           ipAddress: options?.ipAddress,
           userAgent: options?.userAgent,
-        });
+        }, '❌ Registration failed: Password validation failed');
 
         return {
           success: false,
@@ -113,10 +123,29 @@ export class AuthService {
         };
       }
 
+      logger.debug({
+        event: 'password_validation',
+        email: normalizedEmail,
+        step: 'validation',
+      }, '✅ Password validation passed');
+
       // Hash password
+      logger.debug({
+        event: 'password_hashing',
+        email: normalizedEmail,
+        step: 'processing',
+      }, '🔒 Hashing password');
+      
       const passwordHash = await this.passwordService.hashPassword(password);
 
       // Create user
+      logger.debug({
+        event: 'user_creation',
+        email: normalizedEmail,
+        role,
+        step: 'processing',
+      }, '👤 Creating user in database');
+      
       const user = await this.userRepository.create({
         email: normalizedEmail,
         passwordHash,
@@ -126,22 +155,24 @@ export class AuthService {
       });
 
       // Generate tokens
-      const tokens = await this.jwtTokenService.generateTokenPair(user, options);
-
-      logAuthEvent('register', {
+      logger.debug({
+        event: 'token_generation',
         userId: user.id,
         email: normalizedEmail,
-        success: true,
-        ipAddress: options?.ipAddress,
-        userAgent: options?.userAgent,
-      });
+        step: 'processing',
+      }, '🎫 Generating authentication tokens');
+      
+      const tokens = await this.jwtTokenService.generateTokenPair(user, options);
 
       logger.info({
-        event: 'user_created',
+        event: 'registration_success',
         userId: user.id,
         email: normalizedEmail,
         role: user.role,
-      }, 'New user registered successfully');
+        step: 'complete',
+        ipAddress: options?.ipAddress,
+        userAgent: options?.userAgent,
+      }, '✅ User registration completed successfully');
 
       return {
         success: true,
@@ -153,11 +184,12 @@ export class AuthService {
       logger.error({
         event: 'registration_error',
         email: registerData.email,
+        step: 'error',
         error: error instanceof Error ? error.message : 'Unknown error',
         stack: error instanceof Error ? error.stack : undefined,
         ipAddress: options?.ipAddress,
         userAgent: options?.userAgent,
-      }, 'Registration failed with error');
+      }, '💥 Registration failed with unexpected error');
 
       throw new BadRequestException(`Registration failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
